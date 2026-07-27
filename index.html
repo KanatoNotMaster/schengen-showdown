@@ -77,7 +77,7 @@
                         <span>2-Player Sync Engine</span>
                         <span id="syncDot" class="inline-block w-2 h-2 rounded-full bg-slate-500"></span>
                         <span id="syncStatusText" class="text-slate-400 font-medium">Local Mode</span>
-                        <button onclick="openFirebaseConfigModal()" class="text-[10px] bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-0.5 rounded border border-slate-700">
+                        <button onclick="openFirebaseConfigModal()" class="text-[10px] bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-0.5 rounded border border-slate-700 transition">
                             <i class="fa-solid fa-cloud mr-1"></i> Sync Settings
                         </button>
                     </p>
@@ -145,8 +145,8 @@
                     </div>
                     <span class="text-slate-600">|</span>
                     <div class="flex items-center gap-2">
-                        <i class="fa-solid fa-moon text-indigo-400"></i>
-                        <span>Active: 07:00 → 20:00</span>
+                        <i class="fa-solid fa-forward-fast text-emerald-400"></i>
+                        <span>Rest Skip: 19:59 → 07:00 Next Day</span>
                     </div>
                 </div>
 
@@ -209,7 +209,7 @@
                             <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-500 border border-amber-300"></span> Lock (100%)</span>
                         </div>
                     </div>
-                    <button onclick="resetAllTerritories()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] px-3 py-2 rounded-xl border border-slate-700 transition">
+                    <button onclick="promptResetAllTerritories()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] px-3 py-2 rounded-xl border border-slate-700 transition">
                         <i class="fa-solid fa-rotate-left mr-1"></i> Reset Map
                     </button>
                 </div>
@@ -337,14 +337,16 @@
             <h3 class="text-lg font-bold text-slate-100 flex items-center gap-2">
                 <i class="fa-solid fa-clock text-amber-400"></i> Set Master Game Start Time
             </h3>
-            <p class="text-xs text-slate-400">
-                Adjust the master start anchor timestamp (UTC/GMT). All country clocks will calculate automatically based on this starting baseline.
+            <p class="text-xs text-slate-400 leading-relaxed">
+                Adjust the master start anchor timestamp (UTC/GMT). Clocks skip rest periods automatically (19:59 → 07:00 next day).
             </p>
 
             <div class="flex flex-col gap-2">
                 <label class="text-xs font-semibold text-slate-300">Start Date & Time (UTC/GMT):</label>
                 <input type="datetime-local" id="startTimeInput" class="bg-slate-950 border border-slate-800 text-amber-400 font-mono text-sm rounded-xl p-3 focus:outline-none focus:border-amber-500">
             </div>
+
+            <div id="timeErrorMsg" class="hidden text-xs text-rose-400 bg-rose-950/40 border border-rose-800 p-2.5 rounded-xl font-medium"></div>
 
             <!-- Quick Time Jump Controls -->
             <div class="flex flex-col gap-2 pt-2 border-t border-slate-800">
@@ -402,8 +404,10 @@
 }' class="bg-slate-950 border border-slate-800 text-slate-300 font-mono text-xs rounded-xl p-3 focus:outline-none focus:border-amber-500"></textarea>
             </div>
 
+            <div id="fbErrorMsg" class="hidden text-xs text-rose-400 bg-rose-950/40 border border-rose-800 p-2.5 rounded-xl font-medium"></div>
+
             <div class="flex justify-between items-center mt-2">
-                <button onclick="clearFirebaseConfig()" class="text-xs text-rose-400 hover:text-rose-300">
+                <button onclick="clearFirebaseConfig()" class="text-xs text-rose-400 hover:text-rose-300 font-semibold">
                     Disconnect Sync
                 </button>
                 <div class="flex gap-2">
@@ -418,13 +422,30 @@
         </div>
     </div>
 
+    <!-- RESET CONFIRMATION MODAL -->
+    <div id="resetConfirmModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[1200] hidden items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-sm w-full p-6 shadow-2xl flex flex-col gap-4 text-center">
+            <div class="w-12 h-12 rounded-full bg-rose-500/20 text-rose-400 border border-rose-500/30 flex items-center justify-center text-xl mx-auto">
+                <i class="fa-solid fa-triangle-exclamation"></i>
+            </div>
+            <h3 class="text-base font-bold text-slate-100">Reset All Territory Claims?</h3>
+            <p class="text-xs text-slate-400">This action will clear all claims and locks on the interactive map for all players.</p>
+            <div class="grid grid-cols-2 gap-2 mt-2">
+                <button onclick="closeResetModal()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs py-2.5 rounded-xl border border-slate-700 font-semibold">Cancel</button>
+                <button onclick="confirmResetAllTerritories()" class="bg-rose-600 hover:bg-rose-500 text-white text-xs py-2.5 rounded-xl font-bold shadow-lg">Yes, Reset Map</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- TOAST NOTIFICATION CONTAINER -->
+    <div id="toastContainer" class="fixed bottom-5 right-5 z-[2000] flex flex-col gap-2 max-w-sm w-full pointer-events-none"></div>
+
     <!-- Firebase SDK Imports -->
     <script type="module">
         import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
         import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
         import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
 
-        // Expose Firebase modules to window scope for easy usage in app functions
         window.fb = {
             initializeApp,
             getAuth,
@@ -438,48 +459,47 @@
             unsub: null
         };
 
-        // Initialize Firebase if user stored config in localStorage
         initFirebaseFromStorage();
     </script>
 
     <script>
         /* ----------------------------------------------------
-         * 1. PERMANENT SCHENGEN COUNTRIES DATA & STATIC CHALLENGES
+         * 1. PERMANENT SCHENGEN COUNTRIES DATA & CUSTOM CHALLENGES
          * ---------------------------------------------------- */
         const SCHENGEN_COUNTRIES = [
-            { id: "AUT", name: "Austria", flag: "🇦🇹", offset: 2, code: "AT", challenge: { title: "Ode to Joy Performance", type: "Music & Culture", desc: "Beethoven's 9th premiered in Vienna. Recreate or perform the famous line of 'Ode to Joy' on a local instrument or everyday object." } },
-            { id: "BEL", name: "Belgium", flag: "🇧🇪", offset: 2, code: "BE", challenge: { title: "Waffle Stack Mastery", type: "Culinary", desc: "Purchase or find 3 authentic Belgian waffles or local treats and stack them into a stable tower for at least 20 seconds." } },
-            { id: "BGR", name: "Bulgaria", flag: "🇧🇬", offset: 3, code: "BG", challenge: { title: "Valley of Roses Tribute", type: "Creative", desc: "Bulgaria produces much of the world's rose oil. Find or sketch a rose or local floral symbol within 5 minutes." } },
-            { id: "HRV", name: "Croatia", flag: "🇭🇷", offset: 2, code: "HR", challenge: { title: "Glagolitic Cipher", type: "Puzzle", desc: "Croatia used the Glagolitic script. Write your team name using ancient Glagolitic letters on paper or digital sketch." } },
-            { id: "CZE", name: "Czechia", flag: "🇨🇿", offset: 2, code: "CZ", challenge: { title: "Astronomical Clock Pose", type: "Landmark", desc: "Prague features the world's oldest operating astronomical clock. Recreate the motion of the clock's statues with your team." } },
-            { id: "DNK", name: "Denmark", flag: "🇩🇰", offset: 2, code: "DK", challenge: { title: "Hygge Moment Record", type: "Lifestyle", desc: "Embrace 'Hygge': Record a 15-second tranquil clip expressing Danish coziness at a local cafe or scenic spot." } },
-            { id: "EST", name: "Estonia", flag: "🇪🇪", offset: 3, code: "EE", challenge: { title: "e-Residency Digital Speedrun", type: "Digital", desc: "Estonia is famous for digital government. Send an encrypted or formatted digital receipt of your arrival to your team." } },
-            { id: "FIN", name: "Finland", flag: "🇫🇮", offset: 3, code: "FI", challenge: { title: "Sauna Endurance Pose", type: "Endurance", desc: "Finland has over 3 million saunas. Hold a wall-sit squat position for 60 seconds while describing Finnish nature." } },
-            { id: "FRA", name: "France", flag: "🇫🇷", offset: 2, code: "FR", challenge: { title: "Louvre Masterpiece Sketch", type: "Art", desc: "Draw a 2-minute line portrait of Mona Lisa or any French impressionist artwork on your phone or notepad." } },
-            { id: "DEU", name: "Germany", flag: "🇩🇪", offset: 2, code: "DE", challenge: { title: "Autobahn Speed Quiz", type: "Trivia", desc: "Correctly list 5 German car manufacturers and 3 famous German rivers within 45 seconds without using Google." } },
-            { id: "GRC", name: "Greece", flag: "🇬🇷", offset: 3, code: "GR", challenge: { title: "Olympic Flame Dash", type: "Athletic", desc: "Sprit 100 meters while holding a makeshift torch object to honor the birth of the Olympic Games." } },
-            { id: "HUN", name: "Hungary", flag: "🇭🇺", offset: 2, code: "HU", challenge: { title: "Rubik's Cube Sprint", type: "Mental", desc: "Ernő Rubik invented the cube in Budapest. Solve 1 face of a Rubik's cube or complete a 15-puzzle in under 2 minutes." } },
-            { id: "ISL", name: "Iceland", flag: "🇮🇸", offset: 0, code: "IS", challenge: { title: "Volcanic Saga Recital", type: "Storytelling", desc: "Recite an original 4-line poem about ice, fire, and geysers in dramatic Nordic tone." } },
-            { id: "ITA", name: "Italy", flag: "🇮🇹", offset: 2, code: "IT", challenge: { title: "Colosseum Gladiator Stance", type: "Drama", desc: "Strike a heroic gladiator pose in front of a landmark or monument and shout 'Ave!'." } },
-            { id: "LVA", name: "Latvia", flag: "🇱🇻", offset: 3, code: "LV", challenge: { title: "Art Nouveau Motif", type: "Architecture", desc: "Riga is the Art Nouveau capital. Find and photograph floral or organic decorative motifs on nearby buildings." } },
-            { id: "LIE", name: "Liechtenstein", flag: "🇱🇮", offset: 2, code: "LI", challenge: { title: "Alpine Stamp Collector", type: "Speed", desc: "Liechtenstein is famous for rare stamps. Design a custom team postal stamp with paper and pen." } },
-            { id: "LTU", name: "Lithuania", flag: "🇱🇹", offset: 3, code: "LT", challenge: { title: "Amber Trail Treasure", type: "Search", desc: "Locate a yellow or amber-colored natural stone or item and document its discovery." } },
-            { id: "LUX", name: "Luxembourg", flag: "🇱🇺", offset: 2, code: "LU", challenge: { title: "Fortress Citadel Walk", type: "Exploration", desc: "Luxembourg City is built on gorges. Climb 50 consecutive staircase steps without stopping." } },
-            { id: "MLT", name: "Malta", flag: "🇲🇹", offset: 2, code: "MT", challenge: { title: "Knights Templar Oath", type: "History", desc: "Recite the oath of the Knights of Malta in front of an ancient stone structure." } },
-            { id: "NLD", name: "Netherlands", flag: "🇳🇱", offset: 2, code: "NL", challenge: { title: "Windmill Blade Spin", type: "Physical", desc: "Complete 15 large arm rotations (windmill motion) in synch with a teammate." } },
-            { id: "NOR", name: "Norway", flag: "🇳🇴", offset: 2, code: "NO", challenge: { title: "Fjord Viking Battlecry", type: "Vocal", desc: "Record a booming Viking roar echoing across an open outdoor space." } },
-            { id: "POL", name: "Poland", flag: "🇵🇱", offset: 2, code: "PL", challenge: { title: "Chopin Piano Air Solo", type: "Performance", desc: "Perform a dramatic 30-second air-piano solo imitating Frédéric Chopin." } },
-            { id: "PRT", name: "Portugal", flag: "🇵🇹", offset: 1, code: "PT", challenge: { title: "Azulejo Tile Design", type: "Craft", desc: "Draw a blue-and-white blue patterned tile (Azulejo) design on paper within 3 minutes." } },
-            { id: "ROU", name: "Romania", flag: "🇷🇴", offset: 3, code: "RO", challenge: { title: "Transylvanian Legend", type: "Mystery", desc: "Tell a 1-minute spooky gothic story about Bran Castle without saying the word 'Vampire'." } },
-            { id: "SVK", name: "Slovakia", flag: "🇸🇰", offset: 2, code: "SK", challenge: { title: "Tatra Mountain Peak High-Five", type: "Teamwork", desc: "High-five your teammate at the highest elevated spot reachable within 10 minutes." } },
-            { id: "SVN", name: "Slovenia", flag: "🇸🇮", offset: 2, code: "SI", challenge: { title: "Lake Bled Oar Stroke", type: "Simulation", desc: "Simulate rowing a traditional 'Pletna' boat across a lake with 20 synchronous strokes." } },
-            { id: "ESP", name: "Spain", flag: "🇪🇸", offset: 2, code: "ES", challenge: { title: "Flamenco Rhythm Clap", type: "Rhythm", desc: "Clap out a fast 12-beat Flamenco 'Palmas' rhythm accurately with no pauses." } },
-            { id: "SWE", name: "Sweden", flag: "🇸🇪", offset: 2, code: "SE", challenge: { title: "Flat-Pack Furniture Relay", type: "Assembly", desc: "Assemble any multi-part object or folding chair in under 60 seconds with instruction diagrams." } },
-            { id: "CHE", name: "Switzerland", flag: "🇨🇭", offset: 2, code: "CH", challenge: { title: "Precision Swiss Watchmaker", type: "Precision", desc: "Count out exactly 60 seconds mentally without looking at a clock. Target accuracy: ±2 seconds." } },
-            { id: "AND", name: "Andorra", flag: "🇦🇩", offset: 2, code: "AD", challenge: { title: "Pyrenean Trail March", type: "Steep Climb", desc: "Ascend a steep incline or incline treadmill for 2 minutes straight." } },
-            { id: "MCO", name: "Monaco", flag: "🇲🇨", offset: 2, code: "MC", challenge: { title: "Grand Prix Hairpin Turn", type: "Speed", desc: "Run a tight figure-8 slalom course around two markers in under 12 seconds." } },
-            { id: "SMR", name: "San Marino", flag: "🇸🇲", offset: 2, code: "SM", challenge: { title: "Three Towers Sentinel", type: "Guarding", desc: "Stand completely motionless as a citadel guard for 90 seconds." } },
-            { id: "VAT", name: "Vatican City", flag: "🇻🇦", offset: 2, code: "VA", challenge: { title: "Sistine Chapel Ceiling Pose", type: "Art Pose", desc: "Recreate Michelangelo's 'Creation of Adam' touch gesture with a teammate." } }
+            { id: "AUT", name: "Austria", flag: "🇦🇹", offset: 2, code: "AT", challenge: { title: "Brush Your Teeth", type: "Health & Routine", desc: "Brush your teeth in real life for the sake of your oral health. Get at least 0.5 ml of toothpaste on your toothbrush and let the toothbrush touch all of your teeth at least once. (Just brush your teeth once normally.)" } },
+            { id: "BEL", name: "Belgium", flag: "🇧🇪", offset: 2, code: "BE", challenge: { title: "Hot Water Hot Seat", type: "Physical / Endurance", desc: "Both players have 7 minutes to successfully boil hot water at their home. They must drink a cup (at least 300ml) of the hot water while sitting on their seat. After boiling and drinking, this challenge is completed. They may not research during the challenge, as their seat is too hot." } },
+            { id: "BGR", name: "Bulgaria", flag: "🇧🇬", offset: 3, code: "BG", challenge: { title: "Tetris Sprint Blitz", type: "Gaming / Speedrun", desc: "In this challenge, you must complete a 40-line Sprint mode game in tetr.io in 3 minutes or less. The challenge is complete once the victory screen appears with a valid time under the threshold. You may practice as many times as you like, but you must declare your official attempt before launching your final game run." } },
+            { id: "HRV", name: "Croatia", flag: "🇭🇷", offset: 2, code: "HR", challenge: { title: "Get Lucky on Coin Flips", type: "Luck & Probability", desc: "Flip a coin. It must land on the same side 4 times in a row. You have 10 minutes to complete this." } },
+            { id: "CZE", name: "Czechia", flag: "🇨🇿", offset: 2, code: "CZ", challenge: { title: "Identify Flags", type: "Quiz & Geography", desc: "Complete this quiz: https://www.sporcle.com/games/g/worldflags . You have one try, but may practice. You must get 120 of the countries correct." } },
+            { id: "DNK", name: "Denmark", flag: "🇩🇰", offset: 2, code: "DK", challenge: { title: "Ask Gemini What to Do", type: "AI & Prompting", desc: 'Insert the following prompt to Gemini: "Help me think of some 15-min challenges which can be done online. It should be doable within 15 minutes." Choose one of the challenges. If the challenge is not specific enough, type "I would like to choose xxx, generate a specific version of the challenge."' } },
+            { id: "EST", name: "Estonia", flag: "🇪🇪", offset: 3, code: "EE", challenge: { title: "Mind Meld", type: "Teamwork & Telepathy", desc: "In a count down to 3, both team members must say one word. They must say the same word in order to complete this challenge. If the word is different, they must wait 1 minute before reattempting. They have 7 tries. Team members may not collude in any way. Any word said cannot be said again." } },
+            { id: "FIN", name: "Finland", flag: "🇫🇮", offset: 3, code: "FI", challenge: { title: "Win a Game of FIFA", type: "Gaming / EAFC", desc: "Win a game of EAFC 26/Fifa using pc/switch. For casper/cck, they must beat a professional cpu. For isaac/sashimi, they must beat a legendary cpu. Both teams should use Spurs to beat Arsenal. They have one try. If they cannot beat the cpu in a regular 90 mins match, this challenge is failed. The half time length is set to be 3 minutes in this challenge." } },
+            { id: "FRA", name: "France", flag: "🇫🇷", offset: 2, code: "FR", challenge: { title: "Know Ball", type: "Sports Trivia", desc: "English Premier League has a great history. You have one try to complete this quiz: https://www.sporcle.com/games/g/premierleaguealltime . You have to name 30 teams out of a total of 51, in 7 minutes." } },
+            { id: "DEU", name: "Germany", flag: "🇩🇪", offset: 2, code: "DE", challenge: { title: "Withstand the Wind", type: "Physical Endurance", desc: "Typhoon Noul brought us some trouble these days. Stand in front of a functionable electronic fan, turn it on to maximum wind power and open an umbrella straight upwards. The umbrella should be right in front of the fan, with at most 15 cm horizontal distance. Hold on your umbrella for 10 minutes. If your umbrella turns over for over 90 degrees, your challenge fails." } },
+            { id: "GRC", name: "Greece", flag: "🇬🇷", offset: 3, code: "GR", challenge: { title: "Pictionary Prodigy", type: "Drawing Game", desc: "In this challenge, you must join a private room on Gartic.io (General room) and correctly guess the drawing made by your teammates 5 times in a row. The challenge is complete once you achieve a 5-guess streak without missing a turn or guessing incorrectly in between. You only have one attempt, any failed guess or missed turn meaning you have failed the challenge." } },
+            { id: "HUN", name: "Hungary", flag: "🇭🇺", offset: 2, code: "HU", challenge: { title: "The World Is Inside Your Brain", type: "Geography Memory", desc: "As a country claiming game, it is a must for you to have some geography skill. Attend the following quiz. You complete the challenge if you name 134 countries (as the average is 68%) within the 197 countries with only your memory. You may not get any assistance from any possible sources, including books and websites etc. You get one attempt, but you may practice." } },
+            { id: "ISL", name: "Iceland", flag: "🇮🇸", offset: 0, code: "IS", challenge: { title: "Jet Lag Trivia", type: "Show Trivia", desc: "Go to this link. Get at least 80% of the questions correct. You have one try. https://www.sporcle.com/games/jbvann05/jet-lag-the-game-countries" } },
+            { id: "ITA", name: "Italy", flag: "🇮🇹", offset: 2, code: "IT", challenge: { title: "Puzzle Storm Sprint", type: "Chess Speedrun", desc: "In this challenge, you must complete a run of Puzzle Storm on lichess.org/storm and achieve a final score of at least 10 solved puzzles before your 3-minute timer expires. The challenge is complete once your run ends and the final results screen displays a score of 10 or higher. You may attempt Puzzle Storm as many times as you like, but you must declare your official attempt before starting the timer on your final run." } },
+            { id: "LVA", name: "Latvia", flag: "🇱🇻", offset: 3, code: "LV", challenge: { title: "Educate a Friend", type: "Social / Clues", desc: "Call a friend. You have to ask the friend to name the country that you are trying to lock, without mentioning the country’s name, flag colour, or any cities in the country. You have 7 minutes to complete this challenge. If your friend cannot name the country, this challenge is failed. The friend cannot be one of your team members, but it can be a family member. The timer starts now." } },
+            { id: "LIE", name: "Liechtenstein", flag: "🇱🇮", offset: 2, code: "LI", challenge: { title: "Hop on JusDrive", type: "Roblox Navigation", desc: "Play on Roblox and teleport to Central Piers. Then, use ur knowledge to travel to shek o based on irl hong kong map to complete the challenge in 10 minutes once u enter the game." } },
+            { id: "LTU", name: "Lithuania", flag: "🇱🇹", offset: 3, code: "LT", challenge: { title: "Win a Game of Blackjack", type: "Card Games", desc: "Play 247 Blackjack Online – Free & Exciting 24/7 Card Games. Win a game of Blackjack!" } },
+            { id: "LUX", name: "Luxembourg", flag: "🇱🇺", offset: 2, code: "LU", challenge: { title: "Finish the Video", type: "Video Review", desc: "Finish the video and list out 10 things u like about him: I found Alejandro Garnacho's Last 18 Shots..." } },
+            { id: "MLT", name: "Malta", flag: "🇲🇹", offset: 2, code: "MT", challenge: { title: "Geoguessr! :D", type: "Geography Quiz", desc: "https://www.geoguessr.com/quiz/3367aa85-e4b0-46ac-93a6-eb812a5dc021?r=66fd227319107fe352912de2 Get at least 15000 points in this quiz or else u fail." } },
+            { id: "NLD", name: "Netherlands", flag: "🇳🇱", offset: 2, code: "NL", challenge: { title: "British Railway Route", type: "Roblox Simulation", desc: "Complete a route in British Railway | Play on Roblox." } },
+            { id: "NOR", name: "Norway", flag: "🇳🇴", offset: 2, code: "NO", challenge: { title: "Lion Rock Tunnel Buses", type: "Transit Trivia", desc: "Write down 15 bus routes that go through Lion Rock Tunnel." } },
+            { id: "POL", name: "Poland", flag: "🇵🇱", offset: 2, code: "PL", challenge: { title: "Watch Football Highlights", type: "Video Viewing", desc: "Watch both of the videos with normal playback speed: Surfing In The Capital | Chelsea v Man Utd | Highlights & Three MASSIVE Points! | Man Utd v Aston Villa | Highlights." } },
+            { id: "PRT", name: "Portugal", flag: "🇵🇹", offset: 1, code: "PT", challenge: { title: "Rest Time!", type: "Relaxation", desc: "Doomscroll IG for 10 min." } },
+            { id: "ROU", name: "Romania", flag: "🇷🇴", offset: 3, code: "RO", challenge: { title: "Telepathic Tuning", type: "Online Gaming", desc: "In this challenge, you must start a match on wavelength.lol and hit a target in the 4-point center zone at least once within 8 rounds. The challenge is complete as soon as a guess lands in the 4-point area. You may practice as much as you like, but you only get one official attempt (one single 8-round game) to achieve a 4-point score." } },
+            { id: "SVK", name: "Slovakia", flag: "🇸🇰", offset: 2, code: "SK", challenge: { title: "Play Classical Music on Non-Classical Instruments", type: "Roblox Music", desc: "You must play the famous \"Ode to Joy\" theme on roblox visual piano. The challenge is complete once you play the selected portion of the piece correctly (check jet lag the game schengen showdown ep2 40:50 for the piece)(all correct pitches, on beat, at least 140 BPM). You may rehearse as many times as you'd like. You may only make one official attempt at your performance." } },
+            { id: "SVN", name: "Slovenia", flag: "🇸🇮", offset: 2, code: "SI", challenge: { title: "Micro:bit Blind Precision", type: "Coding & Logic", desc: "The timer challenge is very famous on Instagram reels. In this challenge, you must open makecode.microbit.org and program a blind timer from scratch within 10 minutes. Program Requirements:\n- Press A: Starts the timer without displaying any time or indicators on the screen.\n- Press B: Stops the timer and displays the exact time elapsed between pressing A and B.\n- Press A+B: Resets the program/timer so it can be played again.\n\nYou may not conduct any online research, consult AI, or watch tutorials during the challenge. If the program does not function correctly according to all requirements within 10 minutes total from start to finish, the challenge is failed." } },
+            { id: "ESP", name: "Spain", flag: "🇪🇸", offset: 2, code: "ES", challenge: { title: "Kill Time, Then Tell Time", type: "Time Estimation", desc: "Your task now is to do two time-killers of your choice from the list below, then guess what time it is. You may not look at any clocks, and you may not look at the elapsed time on your filming phone. To complete the challenge, your guess must be within 2 minutes of the elapsed time. Your options for time killers are:\n- Name one hundred different real women\n- Play 3 games of Wiki Race." } },
+            { id: "SWE", name: "Sweden", flag: "🇸🇪", offset: 2, code: "SE", challenge: { title: "Nether Speedrun Challenge", type: "Minecraft Speedrun", desc: "In this challenge, you must launch a new, unseeded survival world in Minecraft and construct and light a portal to enter the Nether within 15 minutes. Rules: You must spawn into a fresh, randomly generated Survival world (no set seeds, cheats, or creative mode). The timer starts the second you spawn into the world. The challenge is complete the moment the Nether terrain loads and your player character steps into the Nether dimension. You may practice in other worlds as much as you like, but you have only one official attempt on a fresh world to beat the clock." } },
+            { id: "CHE", name: "Switzerland", flag: "🇨🇭", offset: 2, code: "CH", challenge: { title: "Build a Bad Team on 82-0.com", type: "Sports Simulation", desc: "It’s too tough to build an elite NBA team. Therefore, build your garbage team on 82-0.com under HoopIQ mode. Obtain a team with 30 wins or below. You could try repeatedly within the 7 min span until you succeed." } },
+            { id: "AND", name: "Andorra", flag: "🇦🇩", offset: 2, code: "AD", challenge: { title: "Wiki Rush: Particle Accelerator to LeBron James", type: "Wikipedia Speedrun", desc: "Open the wiki page of Particle Accelerator, click wiki links and get all your way to the Lebron James page! You can go back to the previous page if you get stuck." } },
+            { id: "MCO", name: "Monaco", flag: "🇲🇨", offset: 2, code: "MC", challenge: { title: "Proceed to Level 10 on diep.io", type: "Arcade Gaming", desc: "Click into the classic .io game diep.io and get to level 10. You may try repeatedly until you get to level 10." } },
+            { id: "SMR", name: "San Marino", flag: "🇸🇲", offset: 2, code: "SM", challenge: { title: "Pretend That You Really Went There", type: "Social Prank", desc: "Take a selfie with a picture showing anywhere of the European country/state you are currently in on your PC screen. Send it to any friend or family member that is not in the game of Online Schengen Showdown, and convince them that you are currently there." } },
+            { id: "VAT", name: "Vatican City", flag: "🇻🇦", offset: 2, code: "VA", challenge: { title: "Take a Rest in a Specific Way", type: "Sequence Task", desc: "Do the following actions in a sequence:\n1. Pour at least 200ml of water into a container;\n2. Place any food next to the container;\n3. Go to toilet and do one of the following actions: Rinse your hands / Urine / Shit;\n4. Leave the toilet and immediately lay on a bed for at least 3 minutes;\n5. Eat the food next to the container;\n6. Drink some water you poured into the container;\n7. Eat some of the food you placed next to the container.\n\nThe challenge is failed if any of the following conditions are met:\n- You didn’t complete all the actions, or did them in the wrong sequence;\n- You choked over the water;\n- Your bed is too comfy and you laid on it for over 10 minutes;\n- Your food tasted horrible;\n- You shitted over your pants." } }
         ];
 
         // Default start time anchor strictly to July 28th at 07:00 GMT
@@ -521,15 +541,15 @@
 
         function toggleClock() {
             if (window.isClockRunning) {
-                // Pause clock
                 if (window.lastStartTime > 0) {
                     window.accumulatedRealMs += (Date.now() - window.lastStartTime);
                 }
                 window.isClockRunning = false;
+                showToast("Game clock paused", "info");
             } else {
-                // Start clock
                 window.lastStartTime = Date.now();
                 window.isClockRunning = true;
+                showToast("Game clock started", "success");
             }
 
             saveGameState();
@@ -556,7 +576,9 @@
         }
 
         /* ----------------------------------------------------
-         * 2. REAL-TIME GAME CLOCK CALCULATOR
+         * 2. REAL-TIME GAME CLOCK CALCULATOR (WITH REST PERIOD SKIP)
+         * Rule: Active day runs 07:00 -> 20:00 (13 active game hours = 780 active mins).
+         * After 19:59, the game time skips the overnight rest and immediately starts 07:00 next day.
          * ---------------------------------------------------- */
         function calculateGameTime() {
             let elapsedRealMs = window.accumulatedRealMs;
@@ -568,31 +590,47 @@
 
             const startDate = new Date(window.gameStartUtcMs);
 
-            // Derive starting hour & minute in GMT/UTC directly from anchor
-            const startHour = startDate.getUTCHours();
-            const startMin = startDate.getUTCMinutes();
-            const startTotalGameMinutes = startHour * 60 + startMin;
+            // GMT start time baseline
+            const rawStartHour = startDate.getUTCHours();
+            const rawStartMin = startDate.getUTCMinutes();
 
-            // Scale: 1 real minute = 6 game minutes (10 real mins = 1 game hour)
+            // Calculate starting offset in active game day (07:00 = minute 0; 20:00 = minute 780)
+            let startOffsetInActiveDay = 0;
+            let initialDayOffset = 0;
+
+            if (rawStartHour < 7) {
+                startOffsetInActiveDay = 0; // If set before 07:00, starts at 07:00 same day
+            } else if (rawStartHour >= 20) {
+                startOffsetInActiveDay = 0; // If set at or after 20:00, jumps to 07:00 next day
+                initialDayOffset = 1;
+            } else {
+                startOffsetInActiveDay = (rawStartHour - 7) * 60 + rawStartMin;
+            }
+
+            // Time scaling: 10 real minutes = 1 game hour => 1 real min = 6 game mins
             const totalRealMinutes = elapsedRealMs / (1000 * 60);
-            const totalGameMinutesElapsed = Math.floor(totalRealMinutes * 6);
+            const totalActiveGameMinutesElapsed = totalRealMinutes * 6;
 
-            const currentTotalGameMinutes = startTotalGameMinutes + totalGameMinutesElapsed;
+            const totalActiveMinutes = startOffsetInActiveDay + totalActiveGameMinutesElapsed;
 
-            const totalGameHours = Math.floor(currentTotalGameMinutes / 60);
-            const gmtMinute = Math.floor(currentTotalGameMinutes % 60);
+            // 1 Active game day = 13 active hours = 780 active minutes
+            const ACTIVE_MINS_PER_DAY = 780;
 
-            const daysPassed = Math.floor(totalGameHours / 24);
-            const gmtHour = totalGameHours % 24;
+            const daysPassed = Math.floor(totalActiveMinutes / ACTIVE_MINS_PER_DAY) + initialDayOffset;
+            const activeMinsInCurrentDay = Math.floor(totalActiveMinutes % ACTIVE_MINS_PER_DAY);
 
-            // Compute Game Date
+            // Convert active minutes in current day (0 to 779) to GMT hour (7 to 19) and minute (0 to 59)
+            const gmtHour = 7 + Math.floor(activeMinsInCurrentDay / 60);
+            const gmtMinute = Math.floor(activeMinsInCurrentDay % 60);
+
+            // Derive active game date
             const gameDate = new Date(startDate.getTime());
             gameDate.setUTCDate(startDate.getUTCDate() + daysPassed);
 
             const dayStr = String(gameDate.getUTCDate()).padStart(2, '0');
             const monthStr = String(gameDate.getUTCMonth() + 1).padStart(2, '0');
 
-            // Countdown to next real-world 10-minute game hour boundary
+            // Countdown to next game hour boundary (every 10 real minutes = 600s)
             const totalRealSeconds = elapsedRealMs / 1000;
             const secondsInCycle = totalRealSeconds % 600;
             const realSecsUntilNextHour = (600 - secondsInCycle) % 600;
@@ -606,7 +644,7 @@
                 gmtMinute,
                 cdMin,
                 cdSec,
-                isRestPeriod: gmtHour >= 20 || gmtHour < 7
+                isRestPeriod: false // Rest period is skipped automatically
             };
         }
 
@@ -632,12 +670,9 @@
                 if (!window.isClockRunning) {
                     badge.innerText = "PAUSED";
                     badge.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/50";
-                } else if (gameTime.isRestPeriod) {
-                    badge.innerText = "REST PERIOD";
-                    badge.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30";
                 } else {
-                    badge.innerText = "ACTIVE";
-                    badge.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+                    badge.innerText = "ACTIVE (07:00-20:00)";
+                    badge.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30 animate-pulse";
                 }
             }
 
@@ -897,7 +932,13 @@
             document.getElementById('challengeCountryFlag').innerText = country.flag;
             document.getElementById('modalChallengeTitle').innerText = country.challenge.title;
             document.getElementById('modalChallengeType').innerText = country.challenge.type;
-            document.getElementById('modalChallengeDesc').innerText = country.challenge.desc;
+            
+            // Format line breaks and auto-link URLs in challenge descriptions
+            let formattedDesc = country.challenge.desc
+                .replace(/\n/g, '<br/>')
+                .replace(/(https?:\/\/[^\s<]+)/g, '<a href="$1" target="_blank" rel="noopener noreferrer" class="text-amber-400 underline hover:text-amber-300 font-mono break-all">$1 <i class="fa-solid fa-arrow-up-right-from-square text-[10px]"></i></a>');
+
+            document.getElementById('modalChallengeDesc').innerHTML = formattedDesc;
             document.getElementById('modalChallengeCountry').innerText = `${country.name} (${country.flag})`;
 
             const modal = document.getElementById('challengeModal');
@@ -921,6 +962,8 @@
             renderClockCards();
             updateScoreCounters();
             closeCountryModal();
+
+            showToast(`${selectedCountryId} ${type === 'claim' ? 'claimed' : 'locked'} by ${player}`, 'success');
         }
 
         function clearTerritoryAction() {
@@ -933,16 +976,30 @@
             renderClockCards();
             updateScoreCounters();
             closeCountryModal();
+
+            showToast(`Cleared ownership for ${selectedCountryId}`, 'info');
         }
 
-        function resetAllTerritories() {
-            if (confirm("Reset all claims and locks on the map?")) {
-                window.territoryState = {};
-                saveGameState();
-                updateMapVisuals();
-                renderClockCards();
-                updateScoreCounters();
-            }
+        function promptResetAllTerritories() {
+            const modal = document.getElementById('resetConfirmModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeResetModal() {
+            const modal = document.getElementById('resetConfirmModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function confirmResetAllTerritories() {
+            window.territoryState = {};
+            saveGameState();
+            updateMapVisuals();
+            renderClockCards();
+            updateScoreCounters();
+            closeResetModal();
+            showToast("All map claims have been reset", "info");
         }
 
         function updateScoreCounters() {
@@ -966,7 +1023,7 @@
         }
 
         /* ----------------------------------------------------
-         * 6. TIME CONFIG MODAL (FIXED AND COMPLETED)
+         * 6. TIME CONFIG MODAL & ADJUSTMENT
          * ---------------------------------------------------- */
         function openTimeConfigModal() {
             const dateObj = new Date(window.gameStartUtcMs);
@@ -977,6 +1034,7 @@
             const mm = String(dateObj.getUTCMinutes()).padStart(2, '0');
 
             document.getElementById('startTimeInput').value = `${YYYY}-${MM}-${DD}T${hh}:${mm}`;
+            document.getElementById('timeErrorMsg').classList.add('hidden');
 
             const modal = document.getElementById('timeConfigModal');
             modal.classList.remove('hidden');
@@ -991,7 +1049,13 @@
 
         function saveCustomStartTime() {
             const inputVal = document.getElementById('startTimeInput').value;
-            if (!inputVal) return;
+            const errBox = document.getElementById('timeErrorMsg');
+
+            if (!inputVal) {
+                errBox.innerText = "Please select a valid date and time.";
+                errBox.classList.remove('hidden');
+                return;
+            }
 
             const [datePart, timePart] = inputVal.split('T');
             if (datePart && timePart) {
@@ -1009,10 +1073,13 @@
                     updateClockUI();
                     renderClockCards();
                     closeTimeConfigModal();
+                    showToast("Master game start time updated", "success");
                     return;
                 }
             }
-            alert("Please enter a valid date and time.");
+
+            errBox.innerText = "Please enter a valid date and time.";
+            errBox.classList.remove('hidden');
         }
 
         function setQuickGmtTime(targetHour) {
@@ -1031,6 +1098,7 @@
             updateClockUI();
             renderClockCards();
             closeTimeConfigModal();
+            showToast(`Preset jump to ${String(targetHour).padStart(2,'0')}:00 GMT applied`, "success");
         }
 
         function resetDefaultStartTime() {
@@ -1043,10 +1111,11 @@
             updateClockUI();
             renderClockCards();
             closeTimeConfigModal();
+            showToast("Reset to default start time baseline", "info");
         }
 
         /* ----------------------------------------------------
-         * 7. REAL-TIME FIREBASE SYNC ENGINE
+         * 7. REAL-TIME FIREBASE SYNC ENGINE & LOCAL STORAGE
          * ---------------------------------------------------- */
         function saveGameState() {
             // Save locally
@@ -1078,6 +1147,7 @@
             
             document.getElementById('firebaseConfigInput').value = storedCfg;
             document.getElementById('roomCodeInput').value = storedRoom;
+            document.getElementById('fbErrorMsg').classList.add('hidden');
 
             const modal = document.getElementById('firebaseConfigModal');
             modal.classList.remove('hidden');
@@ -1093,9 +1163,11 @@
         function saveFirebaseConfig() {
             const configText = document.getElementById('firebaseConfigInput').value.trim();
             const roomCode = document.getElementById('roomCodeInput').value.trim() || 'schengen-showdown-1';
+            const errBox = document.getElementById('fbErrorMsg');
 
             if (!configText) {
-                alert("Please enter a valid Firebase JSON configuration.");
+                errBox.innerText = "Please enter a valid Firebase JSON configuration.";
+                errBox.classList.remove('hidden');
                 return;
             }
 
@@ -1105,8 +1177,10 @@
                 localStorage.setItem('schengen_fb_room', roomCode);
                 closeFirebaseConfigModal();
                 initFirebaseFromStorage();
+                showToast("Connected to Firebase sync", "success");
             } catch (e) {
-                alert("Invalid JSON format! Please check your copy-pasted configuration.");
+                errBox.innerText = "Invalid JSON format! Please check your copy-pasted configuration.";
+                errBox.classList.remove('hidden');
             }
         }
 
@@ -1118,6 +1192,7 @@
             document.getElementById('syncDot').className = "inline-block w-2 h-2 rounded-full bg-slate-500";
             document.getElementById('syncStatusText').innerText = "Local Mode";
             closeFirebaseConfigModal();
+            showToast("Disconnected live synchronization", "info");
         }
 
         function initFirebaseFromStorage() {
@@ -1132,7 +1207,6 @@
                 const auth = window.fb.getAuth(app);
                 window.fb.db = window.fb.getFirestore(app);
 
-                // Sign in anonymously
                 window.fb.signInAnonymously(auth).then(() => {
                     const dot = document.getElementById('syncDot');
                     const statusText = document.getElementById('syncStatusText');
@@ -1140,7 +1214,6 @@
                     if (dot) dot.className = "inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
                     if (statusText) statusText.innerText = `Synced (Room: ${roomCode})`;
 
-                    // Setup listener on room document
                     window.fb.roomRef = window.fb.doc(window.fb.db, 'artifacts', 'schengen-app', 'public', 'data', 'rooms', roomCode);
 
                     if (window.fb.unsub) window.fb.unsub();
@@ -1160,7 +1233,6 @@
                             updateMapVisuals();
                             updateScoreCounters();
                         } else {
-                            // Document doesn't exist yet, push initial state
                             saveGameState();
                         }
                     }, (error) => {
@@ -1176,13 +1248,46 @@
             }
         }
 
+        /* ----------------------------------------------------
+         * 8. UI TOAST NOTIFICATION UTILITY
+         * ---------------------------------------------------- */
+        function showToast(message, type = 'info') {
+            const container = document.getElementById('toastContainer');
+            if (!container) return;
+
+            const toast = document.createElement('div');
+            let bgClass = "bg-slate-900 border-slate-700 text-slate-200";
+            let iconClass = "fa-circle-info text-blue-400";
+
+            if (type === 'success') {
+                bgClass = "bg-slate-900 border-emerald-500/50 text-emerald-200";
+                iconClass = "fa-circle-check text-emerald-400";
+            } else if (type === 'error') {
+                bgClass = "bg-slate-900 border-rose-500/50 text-rose-200";
+                iconClass = "fa-circle-exclamation text-rose-400";
+            }
+
+            toast.className = `border p-3 rounded-xl text-xs font-semibold flex items-center gap-2.5 shadow-2xl transition-all duration-300 transform translate-y-2 opacity-0 pointer-events-auto ${bgClass}`;
+            toast.innerHTML = `<i class="fa-solid ${iconClass} text-sm"></i> <span>${message}</span>`;
+
+            container.appendChild(toast);
+
+            setTimeout(() => {
+                toast.classList.remove('translate-y-2', 'opacity-0');
+            }, 10);
+
+            setTimeout(() => {
+                toast.classList.add('opacity-0', 'translate-y-2');
+                setTimeout(() => toast.remove(), 300);
+            }, 3000);
+        }
+
         window.onload = function() {
             updateClockBtnUI();
             updateClockUI();
             renderClockCards();
             updateScoreCounters();
 
-            // Run real-time ticker every second
             setInterval(() => {
                 updateClockUI();
             }, 1000);
