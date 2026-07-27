@@ -1,0 +1,1192 @@
+<!DOCTYPE html>
+<html lang="en" class="h-full bg-slate-950 text-slate-100">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Schengen Showdown - Multi-Player Dashboard</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Leaflet CSS for Map -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <!-- Leaflet JS -->
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- FontAwesome Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+    
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    fontFamily: {
+                        sans: ['Inter', 'sans-serif'],
+                        mono: ['JetBrains Mono', 'monospace'],
+                    },
+                    colors: {
+                        isaac: {
+                            DEFAULT: '#eab308',
+                            light: '#fef08a',
+                            dark: '#ca8a04',
+                            alpha: 'rgba(234, 179, 8, 0.45)'
+                        },
+                        casper: {
+                            DEFAULT: '#ef4444',
+                            light: '#fca5a5',
+                            dark: '#dc2626',
+                            alpha: 'rgba(239, 68, 68, 0.45)'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <style>
+        .font-mono { font-family: 'JetBrains Mono', monospace; }
+        #map { height: calc(100vh - 200px); min-height: 500px; width: 100%; z-index: 10; border-radius: 0.75rem; }
+        .leaflet-container { background-color: #0f172a !important; }
+        .custom-popup .leaflet-popup-content-wrapper {
+            background-color: #1e293b;
+            color: #f8fafc;
+            border-radius: 0.75rem;
+            border: 1px solid #334155;
+            padding: 4px;
+        }
+        .custom-popup .leaflet-popup-tip { background-color: #1e293b; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 4px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+    </style>
+</head>
+<body class="h-full flex flex-col font-sans antialiased text-slate-100 bg-slate-950 overflow-x-hidden">
+
+    <header class="bg-slate-900 border-b border-slate-800 px-4 py-3 sticky top-0 z-50 shadow-lg">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
+            <div class="flex items-center gap-3">
+                <div class="bg-gradient-to-tr from-amber-500 to-rose-600 p-2.5 rounded-xl shadow-md">
+                    <i class="fa-solid font-bold fa-compass-drafting text-white text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="font-extrabold text-lg md:text-xl tracking-tight bg-clip-text text-transparent bg-gradient-to-r from-amber-400 via-rose-400 to-amber-200">
+                        SCHENGEN SHOWDOWN
+                    </h1>
+                    <p class="text-xs text-slate-400 flex items-center gap-2">
+                        <span>2-Player Sync Engine</span>
+                        <span id="syncDot" class="inline-block w-2 h-2 rounded-full bg-slate-500"></span>
+                        <span id="syncStatusText" class="text-slate-400 font-medium">Local Mode</span>
+                        <button onclick="openFirebaseConfigModal()" class="text-[10px] bg-slate-800 hover:bg-slate-700 text-amber-400 px-2 py-0.5 rounded border border-slate-700">
+                            <i class="fa-solid fa-cloud mr-1"></i> Sync Settings
+                        </button>
+                    </p>
+                </div>
+            </div>
+
+            <!-- Master Game Clock Display Header -->
+            <div class="flex items-center gap-3 bg-slate-950 border border-slate-800 px-4 py-2 rounded-xl shadow-inner w-full md:w-auto justify-between md:justify-start">
+                <div class="flex flex-col">
+                    <span class="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">Master Game Time (GMT)</span>
+                    <div class="flex items-baseline gap-2">
+                        <span id="masterClockDisplay" class="font-mono text-xl font-extrabold text-amber-400 tracking-wider">00/00 07:00</span>
+                        <span id="periodBadge" class="text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/50">
+                            PAUSED
+                        </span>
+                    </div>
+                </div>
+                <div class="h-8 w-px bg-slate-800"></div>
+                
+                <button id="toggleClockBtn" onclick="toggleClock()" class="bg-amber-500 hover:bg-amber-400 text-slate-950 px-3.5 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 shadow-lg active:scale-95">
+                    <i class="fa-solid fa-play text-xs" id="clockBtnIcon"></i>
+                    <span id="clockBtnText">Start Clock</span>
+                </button>
+
+                <div class="h-8 w-px bg-slate-800"></div>
+                <div class="flex flex-col text-right">
+                    <span class="text-[10px] text-slate-400 uppercase tracking-widest font-semibold">Next Game Hour</span>
+                    <span id="hourCountdown" class="font-mono text-sm font-bold text-slate-200">10m 00s</span>
+                </div>
+            </div>
+
+            <nav class="flex items-center gap-1 bg-slate-950 p-1 rounded-xl border border-slate-800 w-full md:w-auto">
+                <button onclick="switchTab('clocks')" id="tabBtn-clocks" class="tab-btn px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all bg-amber-500 text-slate-950 shadow-md w-1/2 md:w-auto justify-center">
+                    <i class="fa-solid fa-clock"></i> Country Clocks
+                </button>
+                <button onclick="switchTab('map')" id="tabBtn-map" class="tab-btn px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-900 w-1/2 md:w-auto justify-center">
+                    <i class="fa-solid fa-map-location-dot"></i> Interactive Map
+                </button>
+            </nav>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto p-4 flex flex-col gap-4">
+
+        <!-- TAB 1: COUNTRY CLOCKS -->
+        <section id="tab-clocks" class="tab-content flex flex-col gap-4">
+            
+            <!-- Clock Filters & Quick Rules -->
+            <div class="bg-slate-900 border border-slate-800 rounded-2xl p-4 flex flex-col md:flex-row items-center justify-between gap-4 shadow-sm">
+                <div class="flex items-center gap-3 w-full md:w-auto">
+                    <div class="relative w-full md:w-80">
+                        <i class="fa-solid fa-magnifying-glass absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 text-sm"></i>
+                        <input type="text" id="clockSearch" oninput="renderClockCards()" placeholder="Search country or code..." class="w-full bg-slate-950 border border-slate-800 text-sm rounded-xl pl-9 pr-4 py-2 focus:outline-none focus:border-amber-500 text-slate-200">
+                    </div>
+                    <span id="countryCountBadge" class="text-xs bg-slate-800 border border-slate-700 px-3 py-2 rounded-xl text-slate-300 font-medium whitespace-nowrap">
+                        33 Regions
+                    </span>
+                </div>
+
+                <!-- Clock Scale Rule Indicator -->
+                <div class="flex items-center gap-3 text-xs bg-slate-950 border border-slate-800 px-3.5 py-2 rounded-xl text-slate-300 w-full md:w-auto justify-between">
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-bolt text-amber-400"></i>
+                        <span>10 Real Mins = 1 Game Hour</span>
+                    </div>
+                    <span class="text-slate-600">|</span>
+                    <div class="flex items-center gap-2">
+                        <i class="fa-solid fa-moon text-indigo-400"></i>
+                        <span>Active: 07:00 → 20:00</span>
+                    </div>
+                </div>
+
+                <!-- Game Time Config Modal Trigger -->
+                <button onclick="openTimeConfigModal()" class="bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 text-xs font-semibold px-3.5 py-2 rounded-xl transition flex items-center justify-center gap-2 w-full md:w-auto">
+                    <i class="fa-solid fa-sliders text-amber-400"></i> Adjust Start Time
+                </button>
+            </div>
+
+            <!-- Country Grid -->
+            <div id="countryClockGrid" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                <!-- Dynamically populated country cards -->
+            </div>
+        </section>
+
+        <!-- TAB 2: INTERACTIVE MAP -->
+        <section id="tab-map" class="tab-content hidden flex-col gap-4">
+            <!-- Player Stats Header -->
+            <div class="grid grid-cols-1 md:grid-cols-3 gap-3">
+                <!-- Player 1: Isashimisaac Card -->
+                <div class="bg-slate-900 border-2 border-amber-500/40 rounded-2xl p-3 flex items-center justify-between shadow-lg">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-amber-500 flex items-center justify-center text-slate-950 font-black text-lg shadow-md">
+                            I
+                        </div>
+                        <div>
+                            <h3 class="font-extrabold text-amber-400 text-sm">Isashimisaac</h3>
+                            <p class="text-[11px] text-slate-400">Yellow Team</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 text-xs font-mono">
+                        <span id="isaacClaimedCount" class="bg-amber-500/20 text-amber-300 border border-amber-500/30 px-2.5 py-1 rounded-lg font-bold">0 Claimed</span>
+                        <span id="isaacLockedCount" class="bg-amber-500 text-slate-950 px-2.5 py-1 rounded-lg font-extrabold">0 Locked</span>
+                    </div>
+                </div>
+
+                <!-- Player 2: Ccasperk Card -->
+                <div class="bg-slate-900 border-2 border-rose-500/40 rounded-2xl p-3 flex items-center justify-between shadow-lg">
+                    <div class="flex items-center gap-3">
+                        <div class="w-10 h-10 rounded-xl bg-rose-500 flex items-center justify-center text-white font-black text-lg shadow-md">
+                            C
+                        </div>
+                        <div>
+                            <h3 class="font-extrabold text-rose-400 text-sm">Ccasperk</h3>
+                            <p class="text-[11px] text-slate-400">Red Team</p>
+                        </div>
+                    </div>
+                    <div class="flex items-center gap-2 text-xs font-mono">
+                        <span id="casperClaimedCount" class="bg-rose-500/20 text-rose-300 border border-rose-500/30 px-2.5 py-1 rounded-lg font-bold">0 Claimed</span>
+                        <span id="casperLockedCount" class="bg-rose-500 text-white px-2.5 py-1 rounded-lg font-extrabold">0 Locked</span>
+                    </div>
+                </div>
+
+                <!-- Map Controls -->
+                <div class="bg-slate-900 border border-slate-800 rounded-2xl p-3 flex items-center justify-between text-xs text-slate-300">
+                    <div class="flex flex-col gap-1">
+                        <span class="font-bold text-slate-200">Map Legend</span>
+                        <div class="flex items-center gap-3 text-[11px]">
+                            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-500/50 border border-amber-400"></span> Claim (50%)</span>
+                            <span class="flex items-center gap-1.5"><span class="w-3 h-3 rounded bg-amber-500 border border-amber-300"></span> Lock (100%)</span>
+                        </div>
+                    </div>
+                    <button onclick="resetAllTerritories()" class="bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] px-3 py-2 rounded-xl border border-slate-700 transition">
+                        <i class="fa-solid fa-rotate-left mr-1"></i> Reset Map
+                    </button>
+                </div>
+            </div>
+
+            <!-- Leaflet Map Container -->
+            <div class="relative bg-slate-900 rounded-2xl border border-slate-800 p-2 shadow-2xl">
+                <div id="map"></div>
+                <div class="absolute bottom-4 left-4 z-[400] bg-slate-900/90 backdrop-blur border border-slate-800 px-3 py-1.5 rounded-xl text-xs text-slate-300 flex items-center gap-2 shadow-lg">
+                    <i class="fa-solid fa-hand-pointer text-amber-400"></i> Click any country to Claim, Lock, or view static Challenge
+                </div>
+            </div>
+        </section>
+    </main>
+
+    <!-- COUNTRY ACTION MODAL -->
+    <div id="countryModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[1000] hidden items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl flex flex-col gap-5 relative">
+            <button onclick="closeCountryModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white text-lg">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+
+            <!-- Modal Header -->
+            <div class="flex items-center gap-3 border-b border-slate-800 pb-4">
+                <span id="modalFlag" class="text-4xl">🇫🇷</span>
+                <div>
+                    <h3 id="modalCountryName" class="text-xl font-black text-slate-100">France</h3>
+                    <div class="flex items-center gap-2 text-xs text-slate-400 mt-0.5">
+                        <span id="modalTimezone" class="font-mono text-amber-400">UTC+2</span>
+                        <span>•</span>
+                        <span id="modalLocalClock" class="font-mono font-bold text-slate-200">09:00 Game Time</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Current Territory Status Badge -->
+            <div id="modalCurrentStatus" class="bg-slate-950 border border-slate-800 p-3 rounded-xl flex items-center justify-between text-xs">
+                <span class="text-slate-400">Current Status:</span>
+                <span id="modalStatusBadge" class="font-bold text-slate-300 bg-slate-800 px-2.5 py-1 rounded-lg">Unclaimed</span>
+            </div>
+
+            <!-- Action 1: Claim -->
+            <div class="flex flex-col gap-2">
+                <label class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <i class="fa-solid fa-flag text-amber-400"></i> 1) Claim Territory (50% Opacity)
+                </label>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="setUserTerritoryAction('claim', 'Isashimisaac')" class="bg-amber-500/20 hover:bg-amber-500/30 border border-amber-500/50 text-amber-300 font-bold text-xs py-3 px-3 rounded-xl transition flex items-center justify-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-amber-400"></span> Isashimisaac
+                    </button>
+                    <button onclick="setUserTerritoryAction('claim', 'Ccasperk')" class="bg-rose-500/20 hover:bg-rose-500/30 border border-rose-500/50 text-rose-300 font-bold text-xs py-3 px-3 rounded-xl transition flex items-center justify-center gap-2">
+                        <span class="w-2.5 h-2.5 rounded-full bg-rose-500"></span> Ccasperk
+                    </button>
+                </div>
+            </div>
+
+            <!-- Action 2: Lock -->
+            <div class="flex flex-col gap-2">
+                <label class="text-xs font-bold text-slate-300 uppercase tracking-wider flex items-center gap-1.5">
+                    <i class="fa-solid fa-lock text-rose-400"></i> 2) Lock Territory (Solid Color)
+                </label>
+                <div class="grid grid-cols-2 gap-2">
+                    <button onclick="setUserTerritoryAction('lock', 'Isashimisaac')" class="bg-amber-500 hover:bg-amber-600 text-slate-950 font-black text-xs py-3 px-3 rounded-xl shadow-lg transition flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-lock"></i> Isashimisaac
+                    </button>
+                    <button onclick="setUserTerritoryAction('lock', 'Ccasperk')" class="bg-rose-600 hover:bg-rose-700 text-white font-black text-xs py-3 px-3 rounded-xl shadow-lg transition flex items-center justify-center gap-2">
+                        <i class="fa-solid fa-lock"></i> Ccasperk
+                    </button>
+                </div>
+            </div>
+
+            <!-- View Country Static Challenge Button -->
+            <button onclick="showCountryChallengeModal()" class="w-full bg-slate-800 hover:bg-slate-700 border border-amber-500/40 text-amber-300 font-bold text-xs py-3 px-3 rounded-xl transition flex items-center justify-center gap-2 mt-1 shadow-md">
+                <i class="fa-solid fa-trophy text-amber-400"></i> Show Country Challenge
+            </button>
+
+            <div class="pt-2 border-t border-slate-800 flex justify-between items-center">
+                <button onclick="clearTerritoryAction()" class="text-xs text-rose-400 hover:text-rose-300 font-semibold underline">
+                    Clear Ownership
+                </button>
+                <button onclick="closeCountryModal()" class="bg-slate-800 text-slate-300 hover:text-white text-xs px-4 py-2 rounded-xl border border-slate-700">
+                    Close
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- COUNTRY STATIC CHALLENGE DISPLAY MODAL -->
+    <div id="challengeModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[1100] hidden items-center justify-center p-4">
+        <div class="bg-slate-900 border border-amber-500/40 rounded-2xl max-w-lg w-full p-6 shadow-2xl flex flex-col gap-4 relative">
+            <button onclick="closeChallengeModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white text-lg">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+
+            <div class="flex items-center gap-2 text-amber-400 font-bold text-xs uppercase tracking-wider">
+                <i class="fa-solid fa-trophy"></i> Permanent Region Challenge
+            </div>
+
+            <div class="flex items-center gap-3">
+                <span id="challengeCountryFlag" class="text-3xl">🇫🇷</span>
+                <div>
+                    <h3 id="modalChallengeTitle" class="text-xl font-extrabold text-slate-100">Recreate Art at Museum</h3>
+                    <span id="modalChallengeType" class="text-[11px] font-mono text-amber-400 bg-amber-500/10 border border-amber-500/30 px-2 py-0.5 rounded-md inline-block mt-0.5">Cultural Challenge</span>
+                </div>
+            </div>
+
+            <p id="modalChallengeDesc" class="text-sm text-slate-300 leading-relaxed bg-slate-950 border border-slate-800 p-4 rounded-xl">
+                Go to any museum or monument in the country, then spend 20 minutes recreating three works of art or historical items.
+            </p>
+
+            <div class="flex items-center justify-between text-xs text-slate-400 bg-slate-950 border border-slate-800 p-3 rounded-xl">
+                <span>Unlock Target: <strong id="modalChallengeCountry" class="text-amber-400 font-bold">France</strong></span>
+                <span>Reward: <strong class="text-emerald-400 font-mono">Territory Lock (100%)</strong></span>
+            </div>
+
+            <button onclick="closeChallengeModal()" class="w-full bg-amber-500 text-slate-950 font-bold text-xs py-3 rounded-xl hover:bg-amber-400 transition shadow-lg">
+                Got It / Back to Dashboard
+            </button>
+        </div>
+    </div>
+
+    <!-- START TIME ADJUSTMENT MODAL -->
+    <div id="timeConfigModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[1000] hidden items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-md w-full p-6 shadow-2xl flex flex-col gap-4">
+            <h3 class="text-lg font-bold text-slate-100 flex items-center gap-2">
+                <i class="fa-solid fa-clock text-amber-400"></i> Set Master Game Start Time
+            </h3>
+            <p class="text-xs text-slate-400">
+                Adjust the master start anchor timestamp (UTC/GMT). All country clocks will calculate automatically based on this starting baseline.
+            </p>
+
+            <div class="flex flex-col gap-2">
+                <label class="text-xs font-semibold text-slate-300">Start Date & Time (UTC/GMT):</label>
+                <input type="datetime-local" id="startTimeInput" class="bg-slate-950 border border-slate-800 text-amber-400 font-mono text-sm rounded-xl p-3 focus:outline-none focus:border-amber-500">
+            </div>
+
+            <!-- Quick Time Jump Controls -->
+            <div class="flex flex-col gap-2 pt-2 border-t border-slate-800">
+                <label class="text-[11px] font-bold text-slate-400 uppercase tracking-wider">Quick GMT Time Presets</label>
+                <div class="grid grid-cols-3 gap-2">
+                    <button onclick="setQuickGmtTime(7)" class="bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs font-mono py-2 rounded-xl">07:00 GMT</button>
+                    <button onclick="setQuickGmtTime(12)" class="bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs font-mono py-2 rounded-xl">12:00 GMT</button>
+                    <button onclick="setQuickGmtTime(18)" class="bg-slate-800 hover:bg-slate-700 text-amber-400 border border-slate-700 text-xs font-mono py-2 rounded-xl">18:00 GMT</button>
+                </div>
+            </div>
+
+            <div class="flex justify-between items-center gap-2 mt-2 pt-2 border-t border-slate-800">
+                <button onclick="resetDefaultStartTime()" class="bg-slate-800 text-rose-400 hover:text-rose-300 text-xs px-3 py-2 rounded-xl border border-slate-700">
+                    Reset Default
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="closeTimeConfigModal()" class="bg-slate-800 text-slate-300 text-xs px-3 py-2 rounded-xl border border-slate-700">
+                        Cancel
+                    </button>
+                    <button onclick="saveCustomStartTime()" class="bg-amber-500 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl hover:bg-amber-400">
+                        Apply New Time
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- FIREBASE & ROOM CONFIG MODAL -->
+    <div id="firebaseConfigModal" class="fixed inset-0 bg-slate-950/80 backdrop-blur-sm z-[1000] hidden items-center justify-center p-4">
+        <div class="bg-slate-900 border border-slate-800 rounded-2xl max-w-lg w-full p-6 shadow-2xl flex flex-col gap-4 relative">
+            <button onclick="closeFirebaseConfigModal()" class="absolute top-4 right-4 text-slate-400 hover:text-white text-lg">
+                <i class="fa-solid fa-xmark"></i>
+            </button>
+            <h3 class="text-lg font-bold text-slate-100 flex items-center gap-2">
+                <i class="fa-solid fa-cloud text-amber-400"></i> Firebase Real-time Multi-player Sync
+            </h3>
+            <p class="text-xs text-slate-400 leading-relaxed">
+                To sync map claims and clock status between devices live, paste your Firebase Project configuration JSON object below.
+            </p>
+
+            <div class="flex flex-col gap-2">
+                <label class="text-xs font-semibold text-slate-300">Room Code (Game Session ID):</label>
+                <input type="text" id="roomCodeInput" value="schengen-showdown-1" placeholder="e.g. game-room-1" class="bg-slate-950 border border-slate-800 text-amber-400 font-mono text-xs rounded-xl p-3 focus:outline-none focus:border-amber-500">
+            </div>
+
+            <div class="flex flex-col gap-2">
+                <label class="text-xs font-semibold text-slate-300">Firebase Configuration JSON:</label>
+                <textarea id="firebaseConfigInput" rows="5" placeholder='{
+  "apiKey": "YOUR_API_KEY",
+  "authDomain": "YOUR_PROJECT.firebaseapp.com",
+  "projectId": "YOUR_PROJECT_ID",
+  "storageBucket": "YOUR_PROJECT.appspot.com",
+  "messagingSenderId": "...",
+  "appId": "..."
+}' class="bg-slate-950 border border-slate-800 text-slate-300 font-mono text-xs rounded-xl p-3 focus:outline-none focus:border-amber-500"></textarea>
+            </div>
+
+            <div class="flex justify-between items-center mt-2">
+                <button onclick="clearFirebaseConfig()" class="text-xs text-rose-400 hover:text-rose-300">
+                    Disconnect Sync
+                </button>
+                <div class="flex gap-2">
+                    <button onclick="closeFirebaseConfigModal()" class="bg-slate-800 text-slate-300 text-xs px-3 py-2 rounded-xl border border-slate-700">
+                        Cancel
+                    </button>
+                    <button onclick="saveFirebaseConfig()" class="bg-amber-500 text-slate-950 font-bold text-xs px-4 py-2 rounded-xl hover:bg-amber-400">
+                        Connect & Sync
+                    </button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Firebase SDK Imports -->
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-app.js";
+        import { getAuth, signInAnonymously } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-auth.js";
+        import { getFirestore, doc, onSnapshot, setDoc } from "https://www.gstatic.com/firebasejs/11.6.1/firebase-firestore.js";
+
+        // Expose Firebase modules to window scope for easy usage in app functions
+        window.fb = {
+            initializeApp,
+            getAuth,
+            signInAnonymously,
+            getFirestore,
+            doc,
+            onSnapshot,
+            setDoc,
+            db: null,
+            roomRef: null,
+            unsub: null
+        };
+
+        // Initialize Firebase if user stored config in localStorage
+        initFirebaseFromStorage();
+    </script>
+
+    <script>
+        /* ----------------------------------------------------
+         * 1. PERMANENT SCHENGEN COUNTRIES DATA & STATIC CHALLENGES
+         * ---------------------------------------------------- */
+        const SCHENGEN_COUNTRIES = [
+            { id: "AUT", name: "Austria", flag: "🇦🇹", offset: 2, code: "AT", challenge: { title: "Ode to Joy Performance", type: "Music & Culture", desc: "Beethoven's 9th premiered in Vienna. Recreate or perform the famous line of 'Ode to Joy' on a local instrument or everyday object." } },
+            { id: "BEL", name: "Belgium", flag: "🇧🇪", offset: 2, code: "BE", challenge: { title: "Waffle Stack Mastery", type: "Culinary", desc: "Purchase or find 3 authentic Belgian waffles or local treats and stack them into a stable tower for at least 20 seconds." } },
+            { id: "BGR", name: "Bulgaria", flag: "🇧🇬", offset: 3, code: "BG", challenge: { title: "Valley of Roses Tribute", type: "Creative", desc: "Bulgaria produces much of the world's rose oil. Find or sketch a rose or local floral symbol within 5 minutes." } },
+            { id: "HRV", name: "Croatia", flag: "🇭🇷", offset: 2, code: "HR", challenge: { title: "Glagolitic Cipher", type: "Puzzle", desc: "Croatia used the Glagolitic script. Write your team name using ancient Glagolitic letters on paper or digital sketch." } },
+            { id: "CZE", name: "Czechia", flag: "🇨🇿", offset: 2, code: "CZ", challenge: { title: "Astronomical Clock Pose", type: "Landmark", desc: "Prague features the world's oldest operating astronomical clock. Recreate the motion of the clock's statues with your team." } },
+            { id: "DNK", name: "Denmark", flag: "🇩🇰", offset: 2, code: "DK", challenge: { title: "Hygge Moment Record", type: "Lifestyle", desc: "Embrace 'Hygge': Record a 15-second tranquil clip expressing Danish coziness at a local cafe or scenic spot." } },
+            { id: "EST", name: "Estonia", flag: "🇪🇪", offset: 3, code: "EE", challenge: { title: "e-Residency Digital Speedrun", type: "Digital", desc: "Estonia is famous for digital government. Send an encrypted or formatted digital receipt of your arrival to your team." } },
+            { id: "FIN", name: "Finland", flag: "🇫🇮", offset: 3, code: "FI", challenge: { title: "Sauna Endurance Pose", type: "Endurance", desc: "Finland has over 3 million saunas. Hold a wall-sit squat position for 60 seconds while describing Finnish nature." } },
+            { id: "FRA", name: "France", flag: "🇫🇷", offset: 2, code: "FR", challenge: { title: "Louvre Masterpiece Sketch", type: "Art", desc: "Draw a 2-minute line portrait of Mona Lisa or any French impressionist artwork on your phone or notepad." } },
+            { id: "DEU", name: "Germany", flag: "🇩🇪", offset: 2, code: "DE", challenge: { title: "Autobahn Speed Quiz", type: "Trivia", desc: "Correctly list 5 German car manufacturers and 3 famous German rivers within 45 seconds without using Google." } },
+            { id: "GRC", name: "Greece", flag: "🇬🇷", offset: 3, code: "GR", challenge: { title: "Olympic Flame Dash", type: "Athletic", desc: "Sprit 100 meters while holding a makeshift torch object to honor the birth of the Olympic Games." } },
+            { id: "HUN", name: "Hungary", flag: "🇭🇺", offset: 2, code: "HU", challenge: { title: "Rubik's Cube Sprint", type: "Mental", desc: "Ernő Rubik invented the cube in Budapest. Solve 1 face of a Rubik's cube or complete a 15-puzzle in under 2 minutes." } },
+            { id: "ISL", name: "Iceland", flag: "🇮🇸", offset: 0, code: "IS", challenge: { title: "Volcanic Saga Recital", type: "Storytelling", desc: "Recite an original 4-line poem about ice, fire, and geysers in dramatic Nordic tone." } },
+            { id: "ITA", name: "Italy", flag: "🇮🇹", offset: 2, code: "IT", challenge: { title: "Colosseum Gladiator Stance", type: "Drama", desc: "Strike a heroic gladiator pose in front of a landmark or monument and shout 'Ave!'." } },
+            { id: "LVA", name: "Latvia", flag: "🇱🇻", offset: 3, code: "LV", challenge: { title: "Art Nouveau Motif", type: "Architecture", desc: "Riga is the Art Nouveau capital. Find and photograph floral or organic decorative motifs on nearby buildings." } },
+            { id: "LIE", name: "Liechtenstein", flag: "🇱🇮", offset: 2, code: "LI", challenge: { title: "Alpine Stamp Collector", type: "Speed", desc: "Liechtenstein is famous for rare stamps. Design a custom team postal stamp with paper and pen." } },
+            { id: "LTU", name: "Lithuania", flag: "🇱🇹", offset: 3, code: "LT", challenge: { title: "Amber Trail Treasure", type: "Search", desc: "Locate a yellow or amber-colored natural stone or item and document its discovery." } },
+            { id: "LUX", name: "Luxembourg", flag: "🇱🇺", offset: 2, code: "LU", challenge: { title: "Fortress Citadel Walk", type: "Exploration", desc: "Luxembourg City is built on gorges. Climb 50 consecutive staircase steps without stopping." } },
+            { id: "MLT", name: "Malta", flag: "🇲🇹", offset: 2, code: "MT", challenge: { title: "Knights Templar Oath", type: "History", desc: "Recite the oath of the Knights of Malta in front of an ancient stone structure." } },
+            { id: "NLD", name: "Netherlands", flag: "🇳🇱", offset: 2, code: "NL", challenge: { title: "Windmill Blade Spin", type: "Physical", desc: "Complete 15 large arm rotations (windmill motion) in synch with a teammate." } },
+            { id: "NOR", name: "Norway", flag: "🇳🇴", offset: 2, code: "NO", challenge: { title: "Fjord Viking Battlecry", type: "Vocal", desc: "Record a booming Viking roar echoing across an open outdoor space." } },
+            { id: "POL", name: "Poland", flag: "🇵🇱", offset: 2, code: "PL", challenge: { title: "Chopin Piano Air Solo", type: "Performance", desc: "Perform a dramatic 30-second air-piano solo imitating Frédéric Chopin." } },
+            { id: "PRT", name: "Portugal", flag: "🇵🇹", offset: 1, code: "PT", challenge: { title: "Azulejo Tile Design", type: "Craft", desc: "Draw a blue-and-white blue patterned tile (Azulejo) design on paper within 3 minutes." } },
+            { id: "ROU", name: "Romania", flag: "🇷🇴", offset: 3, code: "RO", challenge: { title: "Transylvanian Legend", type: "Mystery", desc: "Tell a 1-minute spooky gothic story about Bran Castle without saying the word 'Vampire'." } },
+            { id: "SVK", name: "Slovakia", flag: "🇸🇰", offset: 2, code: "SK", challenge: { title: "Tatra Mountain Peak High-Five", type: "Teamwork", desc: "High-five your teammate at the highest elevated spot reachable within 10 minutes." } },
+            { id: "SVN", name: "Slovenia", flag: "🇸🇮", offset: 2, code: "SI", challenge: { title: "Lake Bled Oar Stroke", type: "Simulation", desc: "Simulate rowing a traditional 'Pletna' boat across a lake with 20 synchronous strokes." } },
+            { id: "ESP", name: "Spain", flag: "🇪🇸", offset: 2, code: "ES", challenge: { title: "Flamenco Rhythm Clap", type: "Rhythm", desc: "Clap out a fast 12-beat Flamenco 'Palmas' rhythm accurately with no pauses." } },
+            { id: "SWE", name: "Sweden", flag: "🇸🇪", offset: 2, code: "SE", challenge: { title: "Flat-Pack Furniture Relay", type: "Assembly", desc: "Assemble any multi-part object or folding chair in under 60 seconds with instruction diagrams." } },
+            { id: "CHE", name: "Switzerland", flag: "🇨🇭", offset: 2, code: "CH", challenge: { title: "Precision Swiss Watchmaker", type: "Precision", desc: "Count out exactly 60 seconds mentally without looking at a clock. Target accuracy: ±2 seconds." } },
+            { id: "AND", name: "Andorra", flag: "🇦🇩", offset: 2, code: "AD", challenge: { title: "Pyrenean Trail March", type: "Steep Climb", desc: "Ascend a steep incline or incline treadmill for 2 minutes straight." } },
+            { id: "MCO", name: "Monaco", flag: "🇲🇨", offset: 2, code: "MC", challenge: { title: "Grand Prix Hairpin Turn", type: "Speed", desc: "Run a tight figure-8 slalom course around two markers in under 12 seconds." } },
+            { id: "SMR", name: "San Marino", flag: "🇸🇲", offset: 2, code: "SM", challenge: { title: "Three Towers Sentinel", type: "Guarding", desc: "Stand completely motionless as a citadel guard for 90 seconds." } },
+            { id: "VAT", name: "Vatican City", flag: "🇻🇦", offset: 2, code: "VA", challenge: { title: "Sistine Chapel Ceiling Pose", type: "Art Pose", desc: "Recreate Michelangelo's 'Creation of Adam' touch gesture with a teammate." } }
+        ];
+
+        // Default start time anchor strictly to July 28th at 07:00 GMT
+        const DEFAULT_START_TIME = new Date("2026-07-28T07:00:00Z").getTime(); 
+        
+        // Application State
+        window.gameStartUtcMs = localStorage.getItem('schengen_start_time') 
+            ? parseInt(localStorage.getItem('schengen_start_time')) 
+            : DEFAULT_START_TIME;
+
+        window.territoryState = JSON.parse(localStorage.getItem('schengen_territories') || '{}');
+        window.isClockRunning = localStorage.getItem('schengen_clock_running') === 'true';
+        window.accumulatedRealMs = parseInt(localStorage.getItem('schengen_accumulated_ms') || '0', 10);
+        window.lastStartTime = parseInt(localStorage.getItem('schengen_last_start_time') || '0', 10);
+
+        let selectedCountryId = null;
+        let leafletMap = null;
+        let geojsonLayer = null;
+
+        function switchTab(tabId) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.add('hidden'));
+            document.querySelectorAll('.tab-btn').forEach(el => {
+                el.className = "tab-btn px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all text-slate-400 hover:text-slate-200 hover:bg-slate-900 w-1/2 md:w-auto justify-center";
+            });
+
+            const activeContent = document.getElementById(`tab-${tabId}`);
+            if (activeContent) activeContent.classList.remove('hidden');
+
+            const activeBtn = document.getElementById(`tabBtn-${tabId}`);
+            if (activeBtn) activeBtn.className = "tab-btn px-4 py-2 rounded-lg text-xs font-semibold flex items-center gap-2 transition-all bg-amber-500 text-slate-950 shadow-md w-1/2 md:w-auto justify-center";
+
+            if (tabId === 'map') {
+                setTimeout(() => {
+                    initLeafletMap();
+                    if (leafletMap) leafletMap.invalidateSize();
+                }, 100);
+            }
+        }
+
+        function toggleClock() {
+            if (window.isClockRunning) {
+                // Pause clock
+                if (window.lastStartTime > 0) {
+                    window.accumulatedRealMs += (Date.now() - window.lastStartTime);
+                }
+                window.isClockRunning = false;
+            } else {
+                // Start clock
+                window.lastStartTime = Date.now();
+                window.isClockRunning = true;
+            }
+
+            saveGameState();
+            updateClockBtnUI();
+            updateClockUI();
+            renderClockCards();
+        }
+
+        function updateClockBtnUI() {
+            const btn = document.getElementById('toggleClockBtn');
+            const icon = document.getElementById('clockBtnIcon');
+            const text = document.getElementById('clockBtnText');
+            if (!btn || !icon || !text) return;
+
+            if (window.isClockRunning) {
+                btn.className = "bg-rose-500 hover:bg-rose-400 text-white px-3.5 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 shadow-lg active:scale-95";
+                icon.className = "fa-solid fa-pause text-xs";
+                text.innerText = "Pause Clock";
+            } else {
+                btn.className = "bg-amber-500 hover:bg-amber-400 text-slate-950 px-3.5 py-2 rounded-xl text-xs font-black transition flex items-center gap-2 shadow-lg active:scale-95";
+                icon.className = "fa-solid fa-play text-xs";
+                text.innerText = "Start Clock";
+            }
+        }
+
+        /* ----------------------------------------------------
+         * 2. REAL-TIME GAME CLOCK CALCULATOR
+         * ---------------------------------------------------- */
+        function calculateGameTime() {
+            let elapsedRealMs = window.accumulatedRealMs;
+            if (window.isClockRunning && window.lastStartTime > 0) {
+                elapsedRealMs += (Date.now() - window.lastStartTime);
+            }
+
+            if (elapsedRealMs < 0) elapsedRealMs = 0;
+
+            const startDate = new Date(window.gameStartUtcMs);
+
+            // Derive starting hour & minute in GMT/UTC directly from anchor
+            const startHour = startDate.getUTCHours();
+            const startMin = startDate.getUTCMinutes();
+            const startTotalGameMinutes = startHour * 60 + startMin;
+
+            // Scale: 1 real minute = 6 game minutes (10 real mins = 1 game hour)
+            const totalRealMinutes = elapsedRealMs / (1000 * 60);
+            const totalGameMinutesElapsed = Math.floor(totalRealMinutes * 6);
+
+            const currentTotalGameMinutes = startTotalGameMinutes + totalGameMinutesElapsed;
+
+            const totalGameHours = Math.floor(currentTotalGameMinutes / 60);
+            const gmtMinute = Math.floor(currentTotalGameMinutes % 60);
+
+            const daysPassed = Math.floor(totalGameHours / 24);
+            const gmtHour = totalGameHours % 24;
+
+            // Compute Game Date
+            const gameDate = new Date(startDate.getTime());
+            gameDate.setUTCDate(startDate.getUTCDate() + daysPassed);
+
+            const dayStr = String(gameDate.getUTCDate()).padStart(2, '0');
+            const monthStr = String(gameDate.getUTCMonth() + 1).padStart(2, '0');
+
+            // Countdown to next real-world 10-minute game hour boundary
+            const totalRealSeconds = elapsedRealMs / 1000;
+            const secondsInCycle = totalRealSeconds % 600;
+            const realSecsUntilNextHour = (600 - secondsInCycle) % 600;
+            const cdMin = Math.floor(realSecsUntilNextHour / 60);
+            const cdSec = Math.floor(realSecsUntilNextHour % 60);
+
+            return {
+                dayStr,
+                monthStr,
+                gmtHour,
+                gmtMinute,
+                cdMin,
+                cdSec,
+                isRestPeriod: gmtHour >= 20 || gmtHour < 7
+            };
+        }
+
+        function formatTime(hour, min) {
+            const h = String((hour + 24) % 24).padStart(2, '0');
+            const m = String(min).padStart(2, '0');
+            return `${h}:${m}`;
+        }
+
+        function updateClockUI() {
+            const gameTime = calculateGameTime();
+
+            // 1. Update Master Clock Display
+            const formattedGmt = `${gameTime.dayStr}/${gameTime.monthStr} ${formatTime(gameTime.gmtHour, gameTime.gmtMinute)} GMT`;
+            const masterClockEl = document.getElementById('masterClockDisplay');
+            if (masterClockEl) masterClockEl.innerText = formattedGmt;
+
+            const cdEl = document.getElementById('hourCountdown');
+            if (cdEl) cdEl.innerText = `${String(gameTime.cdMin).padStart(2, '0')}m ${String(gameTime.cdSec).padStart(2, '0')}s`;
+
+            const badge = document.getElementById('periodBadge');
+            if (badge) {
+                if (!window.isClockRunning) {
+                    badge.innerText = "PAUSED";
+                    badge.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-slate-700/50 text-slate-400 border border-slate-600/50";
+                } else if (gameTime.isRestPeriod) {
+                    badge.innerText = "REST PERIOD";
+                    badge.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-indigo-500/20 text-indigo-400 border border-indigo-500/30";
+                } else {
+                    badge.innerText = "ACTIVE";
+                    badge.className = "text-[10px] font-bold px-2 py-0.5 rounded-full bg-emerald-500/20 text-emerald-400 border border-emerald-500/30";
+                }
+            }
+
+            // 2. Update Country Local Clocks
+            SCHENGEN_COUNTRIES.forEach(c => {
+                const clockValEl = document.getElementById(`clock-val-${c.id}`);
+                if (clockValEl) {
+                    const localHour = (gameTime.gmtHour + c.offset) % 24;
+                    clockValEl.innerText = formatTime(localHour, gameTime.gmtMinute);
+                }
+            });
+        }
+
+        /* ----------------------------------------------------
+         * 3. RENDER COUNTRY CLOCK CARDS
+         * ---------------------------------------------------- */
+        function renderClockCards() {
+            const grid = document.getElementById('countryClockGrid');
+            if (!grid) return;
+
+            const searchQuery = (document.getElementById('clockSearch')?.value || '').toLowerCase();
+            const gameTime = calculateGameTime();
+
+            grid.innerHTML = '';
+
+            const filtered = SCHENGEN_COUNTRIES.filter(c => 
+                c.name.toLowerCase().includes(searchQuery) || 
+                c.id.toLowerCase().includes(searchQuery) ||
+                c.code.toLowerCase().includes(searchQuery)
+            );
+
+            document.getElementById('countryCountBadge').innerText = `${filtered.length} Regions`;
+
+            filtered.forEach(c => {
+                const localHour = (gameTime.gmtHour + c.offset) % 24;
+                const localTimeStr = formatTime(localHour, gameTime.gmtMinute);
+                const state = window.territoryState[c.id];
+
+                let borderClass = "border-slate-800 bg-slate-900/90";
+                let badgeHtml = '<span class="text-[10px] text-slate-500 bg-slate-950 px-2 py-0.5 rounded border border-slate-800">Unclaimed</span>';
+
+                if (state) {
+                    if (state.player === 'Isashimisaac') {
+                        if (state.type === 'claim') {
+                            borderClass = "border-amber-500/50 bg-amber-950/20";
+                            badgeHtml = '<span class="text-[10px] font-bold text-amber-300 bg-amber-500/20 px-2 py-0.5 rounded border border-amber-500/40">Claimed (Isaac)</span>';
+                        } else {
+                            borderClass = "border-amber-400 bg-amber-500/20 shadow-amber-500/10 shadow-lg";
+                            badgeHtml = '<span class="text-[10px] font-black text-slate-950 bg-amber-400 px-2 py-0.5 rounded">LOCKED (Isaac)</span>';
+                        }
+                    } else if (state.player === 'Ccasperk') {
+                        if (state.type === 'claim') {
+                            borderClass = "border-rose-500/50 bg-rose-950/20";
+                            badgeHtml = '<span class="text-[10px] font-bold text-rose-300 bg-rose-500/20 px-2 py-0.5 rounded border border-rose-500/40">Claimed (Casper)</span>';
+                        } else {
+                            borderClass = "border-rose-400 bg-rose-500/20 shadow-rose-500/10 shadow-lg";
+                            badgeHtml = '<span class="text-[10px] font-black text-white bg-rose-600 px-2 py-0.5 rounded">LOCKED (Casper)</span>';
+                        }
+                    }
+                }
+
+                const card = document.createElement('div');
+                card.className = `border rounded-2xl p-4 flex flex-col justify-between gap-3 transition-all hover:scale-[1.01] ${borderClass}`;
+                card.innerHTML = `
+                    <div class="flex items-center justify-between">
+                        <div class="flex items-center gap-2.5">
+                            <span class="text-2xl">${c.flag}</span>
+                            <div>
+                                <h4 class="font-extrabold text-sm text-slate-100">${c.name}</h4>
+                                <span class="text-[10px] font-mono text-amber-400">UTC+${c.offset}</span>
+                            </div>
+                        </div>
+                        ${badgeHtml}
+                    </div>
+
+                    <div class="flex items-baseline justify-between bg-slate-950/60 p-2.5 rounded-xl border border-slate-800/80">
+                        <span class="text-[10px] text-slate-400 uppercase font-semibold">Local Game Clock</span>
+                        <span id="clock-val-${c.id}" class="font-mono text-xl font-black text-amber-400 tracking-wider">${localTimeStr}</span>
+                    </div>
+
+                    <div class="grid grid-cols-2 gap-2 mt-1">
+                        <button onclick="openCountryModal('${c.id}')" class="bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold py-2 rounded-xl border border-slate-700 transition flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-flag text-amber-400 text-[11px]"></i> Manage
+                        </button>
+                        <button onclick="showSpecificCountryChallenge('${c.id}')" class="bg-amber-500/10 hover:bg-amber-500/20 text-amber-300 border border-amber-500/30 text-xs font-semibold py-2 rounded-xl transition flex items-center justify-center gap-1.5">
+                            <i class="fa-solid fa-trophy text-amber-400 text-[11px]"></i> Challenge
+                        </button>
+                    </div>
+                `;
+                grid.appendChild(card);
+            });
+        }
+
+        /* ----------------------------------------------------
+         * 4. LEAFLET MAP ENGINE
+         * ---------------------------------------------------- */
+        function initLeafletMap() {
+            if (leafletMap) return;
+
+            leafletMap = L.map('map', {
+                center: [51.1657, 10.4515],
+                zoom: 4,
+                zoomControl: true
+            });
+
+            L.tileLayer('https://{s}.basemaps.cartocdn.com/dark_all/{z}/{x}/{y}{r}.png', {
+                attribution: '&copy; OpenStreetMap &copy; CARTO',
+                subdomains: 'abcd',
+                maxZoom: 10,
+                minZoom: 3
+            }).addTo(leafletMap);
+
+            fetch('https://raw.githubusercontent.com/leakyMirror/map-of-europe/master/GeoJSON/europe.geojson')
+                .then(res => res.json())
+                .then(data => {
+                    geojsonLayer = L.geoJSON(data, {
+                        style: styleCountryFeature,
+                        onEachFeature: onEachCountryFeature
+                    }).addTo(leafletMap);
+                })
+                .catch(err => {
+                    console.log("Map bounds fallback active:", err);
+                });
+        }
+
+        function getCountryStyle(countryId) {
+            const state = window.territoryState[countryId];
+            if (!state) {
+                return {
+                    fillColor: '#3b82f6',
+                    fillOpacity: 0.1,
+                    color: '#475569',
+                    weight: 1.5
+                };
+            }
+
+            if (state.player === 'Isashimisaac') {
+                return {
+                    fillColor: '#eab308',
+                    fillOpacity: state.type === 'claim' ? 0.45 : 0.95,
+                    color: '#fef08a',
+                    weight: state.type === 'lock' ? 3 : 2
+                };
+            } else {
+                return {
+                    fillColor: '#ef4444',
+                    fillOpacity: state.type === 'claim' ? 0.45 : 0.95,
+                    color: '#fca5a5',
+                    weight: state.type === 'lock' ? 3 : 2
+                };
+            }
+        }
+
+        function styleCountryFeature(feature) {
+            const iso = feature.properties.ISO2 || feature.properties.ISO3;
+            const match = SCHENGEN_COUNTRIES.find(c => c.code === iso || c.id === feature.properties.ISO3);
+            if (match) {
+                return getCountryStyle(match.id);
+            }
+            return {
+                fillColor: '#1e293b',
+                fillOpacity: 0.2,
+                color: '#334155',
+                weight: 1
+            };
+        }
+
+        function onEachCountryFeature(feature, layer) {
+            const iso = feature.properties.ISO2 || feature.properties.ISO3;
+            const match = SCHENGEN_COUNTRIES.find(c => c.code === iso || c.id === feature.properties.ISO3);
+
+            if (match) {
+                layer.on({
+                    click: () => openCountryModal(match.id),
+                    mouseover: (e) => {
+                        const l = e.target;
+                        l.setStyle({ weight: 3, color: '#f59e0b' });
+                    },
+                    mouseout: (e) => {
+                        if (geojsonLayer) geojsonLayer.resetStyle(e.target);
+                    }
+                });
+
+                layer.bindTooltip(`<strong>${match.flag} ${match.name}</strong>`, {
+                    className: 'custom-tooltip',
+                    sticky: true
+                });
+            }
+        }
+
+        function updateMapVisuals() {
+            if (geojsonLayer) {
+                geojsonLayer.eachLayer(layer => {
+                    if (layer.feature) {
+                        const iso = layer.feature.properties.ISO2 || layer.feature.properties.ISO3;
+                        const match = SCHENGEN_COUNTRIES.find(c => c.code === iso || c.id === layer.feature.properties.ISO3);
+                        if (match) {
+                            layer.setStyle(getCountryStyle(match.id));
+                        }
+                    }
+                });
+            }
+        }
+
+        /* ----------------------------------------------------
+         * 5. TERRITORY MODAL ACTIONS & STATIC CHALLENGES
+         * ---------------------------------------------------- */
+        function openCountryModal(countryId) {
+            selectedCountryId = countryId;
+            const country = SCHENGEN_COUNTRIES.find(c => c.id === countryId);
+            if (!country) return;
+
+            document.getElementById('modalFlag').innerText = country.flag;
+            document.getElementById('modalCountryName').innerText = country.name;
+            document.getElementById('modalTimezone').innerText = `UTC+${country.offset}`;
+
+            const gameTime = calculateGameTime();
+            const localHour = (gameTime.gmtHour + country.offset) % 24;
+            document.getElementById('modalLocalClock').innerText = `${formatTime(localHour, gameTime.gmtMinute)} Game Time`;
+
+            const currentState = window.territoryState[countryId];
+            const badge = document.getElementById('modalStatusBadge');
+
+            if (!currentState) {
+                badge.innerText = "Unclaimed";
+                badge.className = "font-bold text-slate-400 bg-slate-800 px-2.5 py-1 rounded-lg";
+            } else {
+                const isIsaac = currentState.player === 'Isashimisaac';
+                const typeText = currentState.type === 'claim' ? 'Claimed (50%)' : 'Locked (Solid)';
+                badge.innerText = `${typeText} by ${currentState.player}`;
+                badge.className = isIsaac 
+                    ? "font-extrabold text-amber-300 bg-amber-500/20 border border-amber-500/40 px-2.5 py-1 rounded-lg"
+                    : "font-extrabold text-rose-300 bg-rose-500/20 border border-rose-500/40 px-2.5 py-1 rounded-lg";
+            }
+
+            const modal = document.getElementById('countryModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeCountryModal() {
+            const modal = document.getElementById('countryModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function showCountryChallengeModal() {
+            if (!selectedCountryId) return;
+            showSpecificCountryChallenge(selectedCountryId);
+            closeCountryModal();
+        }
+
+        function showSpecificCountryChallenge(countryId) {
+            const country = SCHENGEN_COUNTRIES.find(c => c.id === countryId);
+            if (!country || !country.challenge) return;
+
+            document.getElementById('challengeCountryFlag').innerText = country.flag;
+            document.getElementById('modalChallengeTitle').innerText = country.challenge.title;
+            document.getElementById('modalChallengeType').innerText = country.challenge.type;
+            document.getElementById('modalChallengeDesc').innerText = country.challenge.desc;
+            document.getElementById('modalChallengeCountry').innerText = `${country.name} (${country.flag})`;
+
+            const modal = document.getElementById('challengeModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeChallengeModal() {
+            const modal = document.getElementById('challengeModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function setUserTerritoryAction(type, player) {
+            if (!selectedCountryId) return;
+
+            window.territoryState[selectedCountryId] = { type, player };
+            saveGameState();
+
+            updateMapVisuals();
+            renderClockCards();
+            updateScoreCounters();
+            closeCountryModal();
+        }
+
+        function clearTerritoryAction() {
+            if (!selectedCountryId) return;
+
+            delete window.territoryState[selectedCountryId];
+            saveGameState();
+
+            updateMapVisuals();
+            renderClockCards();
+            updateScoreCounters();
+            closeCountryModal();
+        }
+
+        function resetAllTerritories() {
+            if (confirm("Reset all claims and locks on the map?")) {
+                window.territoryState = {};
+                saveGameState();
+                updateMapVisuals();
+                renderClockCards();
+                updateScoreCounters();
+            }
+        }
+
+        function updateScoreCounters() {
+            let isaacClaim = 0, isaacLock = 0;
+            let casperClaim = 0, casperLock = 0;
+
+            Object.values(window.territoryState).forEach(st => {
+                if (st.player === 'Isashimisaac') {
+                    if (st.type === 'claim') isaacClaim++;
+                    else isaacLock++;
+                } else if (st.player === 'Ccasperk') {
+                    if (st.type === 'claim') casperClaim++;
+                    else casperLock++;
+                }
+            });
+
+            document.getElementById('isaacClaimedCount').innerText = `${isaacClaim} Claimed`;
+            document.getElementById('isaacLockedCount').innerText = `${isaacLock} Locked`;
+            document.getElementById('casperClaimedCount').innerText = `${casperClaim} Claimed`;
+            document.getElementById('casperLockedCount').innerText = `${casperLock} Locked`;
+        }
+
+        /* ----------------------------------------------------
+         * 6. TIME CONFIG MODAL (FIXED AND COMPLETED)
+         * ---------------------------------------------------- */
+        function openTimeConfigModal() {
+            const dateObj = new Date(window.gameStartUtcMs);
+            const YYYY = dateObj.getUTCFullYear();
+            const MM = String(dateObj.getUTCMonth() + 1).padStart(2, '0');
+            const DD = String(dateObj.getUTCDate()).padStart(2, '0');
+            const hh = String(dateObj.getUTCHours()).padStart(2, '0');
+            const mm = String(dateObj.getUTCMinutes()).padStart(2, '0');
+
+            document.getElementById('startTimeInput').value = `${YYYY}-${MM}-${DD}T${hh}:${mm}`;
+
+            const modal = document.getElementById('timeConfigModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeTimeConfigModal() {
+            const modal = document.getElementById('timeConfigModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function saveCustomStartTime() {
+            const inputVal = document.getElementById('startTimeInput').value;
+            if (!inputVal) return;
+
+            const [datePart, timePart] = inputVal.split('T');
+            if (datePart && timePart) {
+                const [year, month, day] = datePart.split('-').map(Number);
+                const [hour, min] = timePart.split(':').map(Number);
+                const parsedTime = Date.UTC(year, month - 1, day, hour, min, 0);
+
+                if (!isNaN(parsedTime)) {
+                    window.gameStartUtcMs = parsedTime;
+                    window.accumulatedRealMs = 0; // Reset active elapsed time counter to align with new start anchor
+                    if (window.isClockRunning) {
+                        window.lastStartTime = Date.now();
+                    }
+                    saveGameState();
+                    updateClockUI();
+                    renderClockCards();
+                    closeTimeConfigModal();
+                    return;
+                }
+            }
+            alert("Please enter a valid date and time.");
+        }
+
+        function setQuickGmtTime(targetHour) {
+            const dateObj = new Date(window.gameStartUtcMs);
+            const YYYY = dateObj.getUTCFullYear();
+            const MM = dateObj.getUTCMonth();
+            const DD = dateObj.getUTCDate();
+
+            window.gameStartUtcMs = Date.UTC(YYYY, MM, DD, targetHour, 0, 0);
+            window.accumulatedRealMs = 0;
+            if (window.isClockRunning) {
+                window.lastStartTime = Date.now();
+            }
+
+            saveGameState();
+            updateClockUI();
+            renderClockCards();
+            closeTimeConfigModal();
+        }
+
+        function resetDefaultStartTime() {
+            window.gameStartUtcMs = DEFAULT_START_TIME;
+            window.accumulatedRealMs = 0;
+            if (window.isClockRunning) {
+                window.lastStartTime = Date.now();
+            }
+            saveGameState();
+            updateClockUI();
+            renderClockCards();
+            closeTimeConfigModal();
+        }
+
+        /* ----------------------------------------------------
+         * 7. REAL-TIME FIREBASE SYNC ENGINE
+         * ---------------------------------------------------- */
+        function saveGameState() {
+            // Save locally
+            localStorage.setItem('schengen_start_time', window.gameStartUtcMs.toString());
+            localStorage.setItem('schengen_territories', JSON.stringify(window.territoryState));
+            localStorage.setItem('schengen_clock_running', window.isClockRunning ? 'true' : 'false');
+            localStorage.setItem('schengen_accumulated_ms', window.accumulatedRealMs.toString());
+            localStorage.setItem('schengen_last_start_time', window.lastStartTime.toString());
+
+            // Sync to Firebase if connected
+            if (window.fb && window.fb.roomRef) {
+                const payload = {
+                    gameStartUtcMs: window.gameStartUtcMs,
+                    territoryState: window.territoryState,
+                    isClockRunning: window.isClockRunning,
+                    accumulatedRealMs: window.accumulatedRealMs,
+                    lastStartTime: window.lastStartTime,
+                    updatedAt: Date.now()
+                };
+
+                window.fb.setDoc(window.fb.roomRef, payload, { merge: true })
+                    .catch(err => console.error("Firebase sync write error:", err));
+            }
+        }
+
+        function openFirebaseConfigModal() {
+            const storedCfg = localStorage.getItem('schengen_fb_config') || '';
+            const storedRoom = localStorage.getItem('schengen_fb_room') || 'schengen-showdown-1';
+            
+            document.getElementById('firebaseConfigInput').value = storedCfg;
+            document.getElementById('roomCodeInput').value = storedRoom;
+
+            const modal = document.getElementById('firebaseConfigModal');
+            modal.classList.remove('hidden');
+            modal.classList.add('flex');
+        }
+
+        function closeFirebaseConfigModal() {
+            const modal = document.getElementById('firebaseConfigModal');
+            modal.classList.add('hidden');
+            modal.classList.remove('flex');
+        }
+
+        function saveFirebaseConfig() {
+            const configText = document.getElementById('firebaseConfigInput').value.trim();
+            const roomCode = document.getElementById('roomCodeInput').value.trim() || 'schengen-showdown-1';
+
+            if (!configText) {
+                alert("Please enter a valid Firebase JSON configuration.");
+                return;
+            }
+
+            try {
+                JSON.parse(configText); // validate JSON format
+                localStorage.setItem('schengen_fb_config', configText);
+                localStorage.setItem('schengen_fb_room', roomCode);
+                closeFirebaseConfigModal();
+                initFirebaseFromStorage();
+            } catch (e) {
+                alert("Invalid JSON format! Please check your copy-pasted configuration.");
+            }
+        }
+
+        function clearFirebaseConfig() {
+            localStorage.removeItem('schengen_fb_config');
+            if (window.fb && window.fb.unsub) window.fb.unsub();
+            window.fb.roomRef = null;
+
+            document.getElementById('syncDot').className = "inline-block w-2 h-2 rounded-full bg-slate-500";
+            document.getElementById('syncStatusText').innerText = "Local Mode";
+            closeFirebaseConfigModal();
+        }
+
+        function initFirebaseFromStorage() {
+            const configText = localStorage.getItem('schengen_fb_config');
+            const roomCode = localStorage.getItem('schengen_fb_room') || 'schengen-showdown-1';
+
+            if (!configText || !window.fb) return;
+
+            try {
+                const config = JSON.parse(configText);
+                const app = window.fb.initializeApp(config);
+                const auth = window.fb.getAuth(app);
+                window.fb.db = window.fb.getFirestore(app);
+
+                // Sign in anonymously
+                window.fb.signInAnonymously(auth).then(() => {
+                    const dot = document.getElementById('syncDot');
+                    const statusText = document.getElementById('syncStatusText');
+                    
+                    if (dot) dot.className = "inline-block w-2 h-2 rounded-full bg-emerald-500 animate-pulse";
+                    if (statusText) statusText.innerText = `Synced (Room: ${roomCode})`;
+
+                    // Setup listener on room document
+                    window.fb.roomRef = window.fb.doc(window.fb.db, 'artifacts', 'schengen-app', 'public', 'data', 'rooms', roomCode);
+
+                    if (window.fb.unsub) window.fb.unsub();
+
+                    window.fb.unsub = window.fb.onSnapshot(window.fb.roomRef, (snapshot) => {
+                        if (snapshot.exists()) {
+                            const data = snapshot.data();
+                            if (data.gameStartUtcMs !== undefined) window.gameStartUtcMs = data.gameStartUtcMs;
+                            if (data.territoryState !== undefined) window.territoryState = data.territoryState;
+                            if (data.isClockRunning !== undefined) window.isClockRunning = data.isClockRunning;
+                            if (data.accumulatedRealMs !== undefined) window.accumulatedRealMs = data.accumulatedRealMs;
+                            if (data.lastStartTime !== undefined) window.lastStartTime = data.lastStartTime;
+
+                            updateClockBtnUI();
+                            updateClockUI();
+                            renderClockCards();
+                            updateMapVisuals();
+                            updateScoreCounters();
+                        } else {
+                            // Document doesn't exist yet, push initial state
+                            saveGameState();
+                        }
+                    }, (error) => {
+                        console.error("Firestore sync error:", error);
+                        if (dot) dot.className = "inline-block w-2 h-2 rounded-full bg-rose-500";
+                        if (statusText) statusText.innerText = "Sync Error";
+                    });
+                }).catch(err => {
+                    console.error("Firebase auth error:", err);
+                });
+            } catch (err) {
+                console.error("Firebase init failed:", err);
+            }
+        }
+
+        window.onload = function() {
+            updateClockBtnUI();
+            updateClockUI();
+            renderClockCards();
+            updateScoreCounters();
+
+            // Run real-time ticker every second
+            setInterval(() => {
+                updateClockUI();
+            }, 1000);
+        };
+    </script>
+</body>
+</html>
